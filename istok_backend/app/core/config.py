@@ -5,15 +5,15 @@ class Settings(BaseSettings):
     APP_NAME: str = "Istok"
     DEBUG: bool = True
     SECRET_KEY: str
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
-    # Настройки PostgreSQL
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
     POSTGRES_DB: str
     POSTGRES_HOST: str
     POSTGRES_PORT: str
 
-    # Настройки Redis
     REDIS_HOST: str
     REDIS_PORT: str
 
