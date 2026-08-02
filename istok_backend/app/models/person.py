@@ -1,14 +1,25 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, String, Date, Enum as SAEnum, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
-from datetime import datetime
+from datetime import date
+import enum
 from app.core.database import Base
 
-class Tree(Base):
-    __tablename__ = "trees"
+class GenderEnum(str, enum.Enum):
+    MALE = "male"
+    FEMALE = "female"
+
+class Person(Base):
+    __tablename__ = "persons"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    name = Column(String, nullable=False)
-    is_public = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    middle_name = Column(String, nullable=True)
+    birth_date = Column(Date, nullable=True)
+    birth_place = Column(String, nullable=True)
+    death_date = Column(Date, nullable=True)
+    death_place = Column(String, nullable=True)
+    gender = Column(SAEnum(GenderEnum), nullable=True)
+    photo_url = Column(String, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
