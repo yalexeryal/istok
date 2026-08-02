@@ -1,0 +1,21 @@
+# Веб-фреймворк и сервер
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+
+# База данных
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.29.0
+alembic==1.14.1
+
+# Валидация и настройки
+pydantic==2.7.4
+pydantic-settings==2.3.3
+python-dotenv==1.0.1
+
+# Фоновые задачи
+celery==5.4.0
+redis==5.0.6
+
+# Утилиты
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
