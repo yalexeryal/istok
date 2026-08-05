@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update, delete
 from uuid import UUID
 from app.models.life_event import LifeEvent, EventTypeEnum, EventSourceEnum
 from app.models.person import Person
@@ -95,3 +95,65 @@ async def create_life_event(
     await db.refresh(new_event)
 
     return new_event
+
+async def update_life_event(
+        db: AsyncSession,
+        person_id: UUID,
+        event_id: UUID,
+        event_in: "LifeEventUpdate"
+) -> "LifeEvent":
+    """Обновляет вручную созданное событие жизни."""
+    from app.models.life_event import LifeEvent, EventTypeEnum, EventSourceEnum
+
+    # 1. Находим событие и проверяем, что оно принадлежит этой персоне
+    result = await db.execute(
+        select(LifeEvent).where(LifeEvent.id == event_id, LifeEvent.person_id == person_id)
+    )
+    event = result.scalar_one_or_none()
+
+    if not event:
+        raise ValueError("Событие не найдено или не принадлежит этой персоне")
+
+    if event.source == EventSourceEnum.AUTO:
+        raise ValueError(
+            "Автоматические события нельзя редактировать напрямую. Измените соответствующую связь или данные персоны.")
+
+    # 2. Обновляем только переданные поля
+    update_data = event_in.model_dump(exclude_unset=True)
+
+    if "event_type" in update_data:
+        try:
+            update_data["event_type"] = EventTypeEnum(update_data["event_type"].lower())
+        except ValueError:
+            raise ValueError(f"Неизвестный тип события: {update_data['event_type']}")
+
+    for key, value in update_data.items():
+        setattr(event, key, value)
+
+    await db.commit()
+    await db.refresh(event)
+    return event
+
+
+async def delete_life_event(
+        db: AsyncSession,
+        person_id: UUID,
+        event_id: UUID
+) -> bool:
+    """Удаляет вручную созданное событие жизни."""
+    from app.models.life_event import LifeEvent, EventSourceEnum
+
+    result = await db.execute(
+        select(LifeEvent).where(LifeEvent.id == event_id, LifeEvent.person_id == person_id)
+    )
+    event = result.scalar_one_or_none()
+
+    if not event:
+        raise ValueError("Событие не найдено или не принадлежит этой персоне")
+
+    if event.source == EventSourceEnum.AUTO:
+        raise ValueError("Автоматические события нельзя удалять. Удалите соответствующую связь или данные персоны.")
+
+    await db.delete(event)
+    await db.commit()
+    return True

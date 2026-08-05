@@ -24,3 +24,15 @@ class PersonAddResponse(BaseModel):
     person_id: Optional[UUID] = None
     message: str
     matches: Optional[List[PersonMatch]] = None
+
+class PersonSearchResponse(BaseModel):
+    id: UUID
+    first_name: str
+    last_name: str
+    middle_name: Optional[str] = None
+    birth_date: Optional[date] = None
+    gender: Optional[str] = None
+    similarity: float = Field(..., description="Процент совпадения (0.0 - 1.0)")
+
+    class Config:
+        from_attributes = True

@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func, or_
 from uuid import UUID
 from app.models.person import Person, GenderEnum
 from app.models.tree import Tree
@@ -166,3 +166,61 @@ async def add_person_to_tree(
         "person_id": new_person.id,
         "matches": []
     }
+
+
+from sqlalchemy import func, or_
+
+
+async def search_persons(
+        db: AsyncSession,
+        query: str,
+        limit: int = 20
+) -> list[dict]:
+    """
+    Нечеткий поиск персон по имени, фамилии и отчеству с использованием pg_trgm.
+    Возвращает список персон с процентом совпадения.
+    """
+    # Используем оператор % (similarity) для нечеткого поиска
+    # similarity() возвращает значение от 0.0 до 1.0
+    stmt = (
+        select(
+            Person,
+            func.greatest(
+                func.similarity(Person.first_name, query),
+                func.similarity(Person.last_name, query),
+                func.similarity(Person.middle_name, query)
+            ).label("similarity")
+        )
+        .where(
+            or_(
+                Person.first_name.ilike(f"%{query}%"),
+                Person.last_name.ilike(f"%{query}%"),
+                Person.middle_name.ilike(f"%{query}%"),
+                func.similarity(Person.first_name, query) > 0.3,
+                func.similarity(Person.last_name, query) > 0.3,
+                func.similarity(Person.middle_name, query) > 0.3
+            )
+        )
+        .order_by(func.greatest(
+            func.similarity(Person.first_name, query),
+            func.similarity(Person.last_name, query),
+            func.similarity(Person.middle_name, query)
+        ).desc())
+        .limit(limit)
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    return [
+        {
+            "id": row.Person.id,
+            "first_name": row.Person.first_name,
+            "last_name": row.Person.last_name,
+            "middle_name": row.Person.middle_name,
+            "birth_date": row.Person.birth_date,
+            "gender": row.Person.gender.value if row.Person.gender else None,
+            "similarity": round(row.similarity, 3)
+        }
+        for row in rows
+    ]
