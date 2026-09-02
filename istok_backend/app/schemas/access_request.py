@@ -1,22 +1,23 @@
 from pydantic import BaseModel
-from datetime import datetime
 from uuid import UUID
 from typing import Optional
+from datetime import datetime
+
+class AccessRequestCreate(BaseModel):
+    tree_id: UUID
+    message: Optional[str] = None
 
 class AccessRequestResponse(BaseModel):
     id: UUID
-    requester_id: UUID
-    requester_name: str
     tree_id: UUID
-    tree_name: str
-    person_id: Optional[UUID] = None
-    person_name: Optional[str] = None
+    requester_id: UUID
+    requester_name: Optional[str] = None
+    message: Optional[str] = None
     status: str
-    created_at: datetime
+    created_at: Optional[datetime] = None  # <-- ИЗМЕНЕНО: добавлен Optional и default None
 
     class Config:
         from_attributes = True
 
 class AccessRequestAction(BaseModel):
-    """Схема для действия над запросом"""
     action: str  # "approve" или "reject"

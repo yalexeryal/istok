@@ -39,9 +39,11 @@ uploads_dir = Path(__file__).parent.parent / "uploads"
 uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
+
 @app.get("/")
 async def root():
     return {"message": "Добро пожаловать в Исток! API работает."}
+
 
 @app.get("/health")
 async def health_check():
