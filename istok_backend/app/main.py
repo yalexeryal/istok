@@ -15,6 +15,15 @@ from app.api import (
     life_events,
     export
 )
+from app.core.logger import get_logger
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+import time
+from fastapi.middleware.cors import CORSMiddleware
+
+
+logger = get_logger("main")
 
 settings = get_settings()
 
@@ -49,3 +58,54 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("🚀 Исток API запускается...")
+    logger.info(f"📊 База данных: {settings.DATABASE_URL[:30]}...")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("👋 Исток API останавливается")
+
+
+
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start_time = time.time()
+
+        response = await call_next(request)
+
+        process_time = (time.time() - start_time) * 1000
+
+        # Логируем каждый запрос
+        logger.info(
+            f"{request.method} {request.url.path} - {response.status_code} - {process_time:.2f}ms"
+        )
+
+        return response
+
+
+# Добавьте middleware ПЕРЕД другими middleware
+app.add_middleware(RequestLoggingMiddleware)
+
+from fastapi.middleware.cors import CORSMiddleware
+
+# Настройки CORS
+origins = [
+    "http://localhost:3000",  # React dev server
+    "http://localhost:5173",  # Vite dev server
+    "http://localhost:8080",  # Vue dev server
+    # В продакшене добавьте ваш домен:
+    # "https://istok.yourdomain.com"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # Разрешенные домены
+    allow_credentials=True,  # Разрешить куки и авторизацию
+    allow_methods=["*"],     # Разрешить все HTTP методы
+    allow_headers=["*"],     # Разрешить все заголовки
+)
