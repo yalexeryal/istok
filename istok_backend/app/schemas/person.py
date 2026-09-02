@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 from typing import Optional, List
 
@@ -36,3 +36,13 @@ class PersonSearchResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class PersonUpdate(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    middle_name: Optional[str] = None
+    birth_date: Optional[date] = None
+    birth_place: Optional[str] = None
+    death_date: Optional[date] = None
+    death_place: Optional[str] = None
+    gender: Optional[str] = None

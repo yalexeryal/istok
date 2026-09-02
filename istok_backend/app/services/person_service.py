@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func, or_
+from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from app.models.person import Person, GenderEnum
 from app.models.tree import Tree
@@ -8,7 +9,12 @@ from app.models.access_request import AccessRequest, RequestStatusEnum
 from app.models.notification import Notification, NotificationTypeEnum
 from app.models.life_event import LifeEvent, EventTypeEnum, EventSourceEnum
 from app.models.user import User
-from app.schemas.person import PersonCreate, PersonMatch
+from app.schemas.person import PersonCreate, PersonMatch, PersonUpdate
+from sqlalchemy import delete
+from app.models.relation import Relation
+from app.services.access_service import check_person_access, check_tree_access
+from typing import Optional
+from datetime import date
 
 
 async def find_similar_persons(db: AsyncSession, person_in: PersonCreate) -> list[Person]:
@@ -224,3 +230,123 @@ async def search_persons(
         }
         for row in rows
     ]
+
+
+async def update_person(
+        db: AsyncSession,
+        person_id: UUID,
+        user_id: UUID,
+        person_in: "PersonUpdate"
+) -> "Person":
+    """Обновляет данные персоны."""
+
+
+    # Проверка прав доступа
+    if not await check_person_access(db, person_id, user_id):
+        raise ValueError("У вас нет доступа к этой персоне")
+
+    # Получаем персону
+    result = await db.execute(select(Person).where(Person.id == person_id))
+    person = result.scalar_one_or_none()
+    if not person:
+        raise ValueError("Персона не найдена")
+
+    # Обновляем только переданные поля
+    update_data = person_in.dict(exclude_unset=True)
+
+    # Обработка gender (если передан как строка)
+    if "gender" in update_data and update_data["gender"]:
+        from app.models.person import GenderEnum
+        try:
+            update_data["gender"] = GenderEnum(update_data["gender"])
+        except ValueError:
+            raise ValueError(f"Недопустимое значение пола: {update_data['gender']}")
+
+    for field, value in update_data.items():
+        setattr(person, field, value)
+
+    await db.commit()
+    await db.refresh(person)
+    return person
+
+
+async def delete_person(db: AsyncSession, person_id: UUID, user_id: UUID) -> None:
+    """Удаляет персону и все связанные данные."""
+    # Проверка прав доступа
+    if not await check_person_access(db, person_id, user_id):
+        raise ValueError("У вас нет доступа к этой персоне")
+
+    # Каскадное удаление: связи, события, привязки к деревьям
+    await db.execute(delete(Relation).where(
+        (Relation.person_1_id == person_id) | (Relation.person_2_id == person_id)
+    ))
+    await db.execute(delete(LifeEvent).where(LifeEvent.person_id == person_id))
+    await db.execute(delete(TreePerson).where(TreePerson.person_id == person_id))
+
+    # Удаляем саму персону
+    result = await db.execute(delete(Person).where(Person.id == person_id))
+
+    if result.rowcount == 0:
+        raise ValueError("Персона не найдена")
+
+    await db.commit()
+
+
+
+async def search_persons_in_tree(
+        db: AsyncSession,
+        tree_id: UUID,
+        user_id: UUID,
+        q: Optional[str] = None,
+        birth_year: Optional[int] = None,
+        birth_place: Optional[str] = None,
+        gender: Optional[str] = None
+) -> list[Person]:
+    """Ищет персон в дереве по заданным критериям."""
+
+    # 1. Проверка прав доступа
+    if not await check_tree_access(db, tree_id, user_id):
+        raise ValueError("У вас нет доступа к этому дереву")
+
+    # 2. Базовый запрос
+    query = select(Person).join(
+        TreePerson, Person.id == TreePerson.person_id
+    ).where(TreePerson.tree_id == tree_id)
+
+    # 3. Полнотекстовый поиск
+    if q:
+        search_term = f"%{q}%"
+        query = query.where(
+            or_(
+                Person.first_name.ilike(search_term),
+                Person.last_name.ilike(search_term),
+                Person.middle_name.ilike(search_term),
+                Person.birth_place.ilike(search_term),
+                Person.death_place.ilike(search_term)
+            )
+        )
+
+    # 4. Фильтр по году рождения (ИСПРАВЛЕНО: используем datetime.date объекты)
+    if birth_year:
+        start_date = date(birth_year, 1, 1)
+        end_date = date(birth_year, 12, 31)
+        query = query.where(
+            Person.birth_date >= start_date,
+            Person.birth_date <= end_date
+        )
+
+    # 5. Фильтр по месту рождения
+    if birth_place:
+        query = query.where(Person.birth_place.ilike(f"%{birth_place}%"))
+
+    # 6. Фильтр по полу
+    if gender:
+        try:
+            gender_enum = GenderEnum(gender.lower())
+            query = query.where(Person.gender == gender_enum)
+        except ValueError:
+            pass
+
+    # 7. Выполняем запрос
+    result = await db.execute(query)
+    return result.scalars().all()

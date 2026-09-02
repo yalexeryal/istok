@@ -4,14 +4,14 @@ from sqlalchemy import select
 from uuid import UUID
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.schemas.person import PersonCreate, PersonAddResponse, PersonSearchResponse
+from app.schemas.person import PersonCreate, PersonAddResponse, PersonSearchResponse, PersonUpdate
 from app.services import person_service, access_service, photo_service
 from app.models.tree import Tree
 from app.models.person import Person
 from app.models.user import User
-from typing import List
+from typing import List, Optional
 
-router = APIRouter(tags=["Persons"])
+router = APIRouter(prefix="/persons", tags=["Persons"])
 
 
 @router.get("/persons/search", response_model=List[PersonSearchResponse])
@@ -125,3 +125,103 @@ async def delete_person_photo(
         return {"message": "Фото успешно удалено"}
 
     return {"message": "У персоны не было фото"}
+
+
+
+
+@router.patch("/{person_id}", response_model=dict)
+async def update_person(
+    person_id: UUID,
+    person_in: PersonUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Обновляет данные персоны."""
+    try:
+        person = await person_service.update_person(db, person_id, current_user.id, person_in)
+        return {"message": "Персона успешно обновлена", "person_id": str(person.id)}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+@router.delete("/{person_id}", response_model=dict)
+async def delete_person(
+    person_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Удаляет персону и все связанные данные."""
+    try:
+        await person_service.delete_person(db, person_id, current_user.id)
+        return {"message": "Персона успешно удалена"}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+
+@router.patch("/{person_id}", response_model=dict)
+async def update_person(
+    person_id: UUID,
+    person_in: PersonUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Обновляет данные персоны."""
+    try:
+        person = await person_service.update_person(db, person_id, current_user.id, person_in)
+        return {"message": "Персона успешно обновлена", "person_id": str(person.id)}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+@router.delete("/{person_id}", response_model=dict)
+async def delete_person(
+    person_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Удаляет персону и все связанные данные (связи, события)."""
+    try:
+        await person_service.delete_person(db, person_id, current_user.id)
+        return {"message": "Персона успешно удалена"}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.get("/trees/{tree_id}/search", response_model=list[dict])
+async def search_persons(
+        tree_id: UUID,
+        q: Optional[str] = Query(None, description="Поиск по имени, фамилии или месту"),
+        birth_year: Optional[int] = Query(None, description="Год рождения (например, 1990)"),
+        birth_place: Optional[str] = Query(None, description="Место рождения"),
+        gender: Optional[str] = Query(None, description="Пол: male, female или unknown"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """Расширенный поиск персон внутри конкретного дерева."""
+    try:
+        from app.services.person_service import search_persons_in_tree
+        persons = await search_persons_in_tree(
+            db=db,
+            tree_id=tree_id,
+            user_id=current_user.id,
+            q=q,
+            birth_year=birth_year,
+            birth_place=birth_place,
+            gender=gender
+        )
+
+        # Форматируем ответ в простой словарь для JSON
+        return [
+            {
+                "id": str(p.id),
+                "first_name": p.first_name,
+                "last_name": p.last_name,
+                "middle_name": p.middle_name,
+                "birth_date": p.birth_date.isoformat() if p.birth_date else None,
+                "birth_place": p.birth_place,
+                "gender": p.gender.value if p.gender else None,
+                "photo_url": p.photo_url
+            }
+            for p in persons
+        ]
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
