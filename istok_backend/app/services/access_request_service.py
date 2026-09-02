@@ -9,23 +9,22 @@ from typing import Optional
 
 
 async def create_access_request(
-        db: AsyncSession,
-        requester_id: UUID,
-        tree_id: UUID,
-        person_id: Optional[UUID] = None
+    db: AsyncSession, 
+    requester_id: UUID, 
+    tree_id: UUID
 ) -> "AccessRequest":
     """Создает запрос на доступ к дереву."""
     from app.models.access_request import AccessRequest, RequestStatusEnum
     from app.models.tree import Tree
     from app.models.notification import Notification, NotificationTypeEnum
-
+    
     # 1. Проверяем существование дерева
     tree_res = await db.execute(select(Tree).where(Tree.id == tree_id))
     tree = tree_res.scalar_one_or_none()
     if not tree:
         raise ValueError("Дерево не найдено")
-
-    # 2. Проверка на дубликаты (уже есть pending или approved)
+    
+    # 2. Проверка на дубликаты
     req_res = await db.execute(select(AccessRequest).where(
         AccessRequest.tree_id == tree_id,
         AccessRequest.requester_id == requester_id,
@@ -34,31 +33,30 @@ async def create_access_request(
     if req_res.scalar_one_or_none():
         raise ValueError("Запрос уже существует или уже одобрен")
 
-    # 3. Создаем запрос
+    # 3. Создаем запрос (БЕЗ person_id, так как его нет в модели)
     new_req = AccessRequest(
         tree_id=tree_id,
         requester_id=requester_id,
-        person_id=person_id,
         status=RequestStatusEnum.PENDING
     )
     db.add(new_req)
     await db.commit()
     await db.refresh(new_req)
 
-    # 4. Создаем уведомление для владельца дерева (БЕЗ поля message, как в вашей модели!)
+    # 4. Создаем уведомление для владельца
     notification = Notification(
         user_id=tree.owner_id,
         type=NotificationTypeEnum.NEW_REQUEST,
         payload={
-            "request_id": str(new_req.id),
-            "requester_id": str(requester_id),
+            "request_id": str(new_req.id), 
+            "requester_id": str(requester_id), 
             "tree_name": tree.name
         },
         is_read=False
     )
     db.add(notification)
     await db.commit()
-
+    
     return new_req
 
 async def get_tree_requests(db: AsyncSession, tree_id: UUID, owner_id: UUID) -> list[dict]:
