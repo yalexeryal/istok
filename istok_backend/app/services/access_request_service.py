@@ -47,16 +47,17 @@ async def create_access_request(
     notification = Notification(
         user_id=tree.owner_id,
         type=NotificationTypeEnum.NEW_REQUEST,
+        message=f"Пользователь запрашивает доступ к дереву '{tree.name}'",  # <-- ДОБАВИТЬ ЭТУ СТРОКУ
         payload={
-            "request_id": str(new_req.id), 
-            "requester_id": str(requester_id), 
+            "request_id": str(new_req.id),
+            "requester_id": str(requester_id),
             "tree_name": tree.name
         },
         is_read=False
     )
     db.add(notification)
     await db.commit()
-    
+
     return new_req
 
 async def get_tree_requests(db: AsyncSession, tree_id: UUID, owner_id: UUID) -> list[dict]:

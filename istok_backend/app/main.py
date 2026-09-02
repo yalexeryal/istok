@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from app.core.config import get_settings
 from pathlib import Path
+from app.core.config import get_settings
 
 from app.api import (
     auth,
@@ -12,7 +12,8 @@ from app.api import (
     notifications,
     relations,
     graph,
-    life_events
+    life_events,
+    export
 )
 
 settings = get_settings()
@@ -33,17 +34,17 @@ app.include_router(notifications.router)
 app.include_router(relations.router)
 app.include_router(graph.router)
 app.include_router(life_events.router)
+app.include_router(export.router)  # <-- ДОБАВЬТЕ ЭТУ СТРОКУ
 
-# Монтируем папку uploads для отдачи загруженных файлов
-uploads_dir = Path(__file__).parent.parent / "uploads"
-uploads_dir.mkdir(exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
-
+# Монтируем папку uploads
+BASE_DIR = Path(__file__).resolve().parent.parent
+UPLOADS_DIR = BASE_DIR / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 @app.get("/")
 async def root():
     return {"message": "Добро пожаловать в Исток! API работает."}
-
 
 @app.get("/health")
 async def health_check():
