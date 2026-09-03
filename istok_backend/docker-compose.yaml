@@ -32,9 +32,6 @@ services:
         condition: service_healthy
     networks:
       - istok_network
-    # В продакшене не пробрасываем порты наружу, доступ только через Nginx
-    # ports:
-    #   - "8000:8000"
 
   nginx:
     image: nginx:alpine
@@ -45,8 +42,7 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro # Для SSL-сертификатов в будущем
-      - static_volume:/app/static # Если будете раздавать статику через Nginx
+      - ./nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       - api
     networks:
@@ -54,7 +50,6 @@ services:
 
 volumes:
   postgres_data:
-  static_volume:
 
 networks:
   istok_network:

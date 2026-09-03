@@ -21,3 +21,4 @@ bcrypt==4.1.2
 python-jose[cryptography]==3.3.0
 
 loguru==0.7.3
+python-gedcom==1.1.0
