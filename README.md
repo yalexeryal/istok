@@ -3,7 +3,8 @@
 [Исток](img/logo.png)
 
 ## Структура проекта:
-``istok-backend/
+```
+istok-backend/
 ├── alembic/                 # Миграции базы данных (создаст Alembic)
 │   └── versions/
 ├── app/                     # Исходный код приложения

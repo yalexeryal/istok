@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 from logging.config import fileConfig
 from app.core.config import get_settings
 from app.core.database import Base

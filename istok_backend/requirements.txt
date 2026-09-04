@@ -22,3 +22,7 @@ python-jose[cryptography]==3.3.0
 
 loguru==0.7.3
 python-gedcom==1.1.0
+
+# Экспорт в PDF
+fpdf2==2.8.2
+matplotlib==3.9.2

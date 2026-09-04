@@ -220,3 +220,6 @@ __marimo__/
 техкарта/
 uploads/
 img/
+.env
+.env.prod
+nginx/ssl
