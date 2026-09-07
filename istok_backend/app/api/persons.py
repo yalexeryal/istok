@@ -1,227 +1,347 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+# -*- coding: utf-8 -*-
+import os
+import uuid
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from uuid import UUID
+
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.schemas.person import PersonCreate, PersonAddResponse, PersonSearchResponse, PersonUpdate
-from app.services import person_service, access_service, photo_service
-from app.models.tree import Tree
-from app.models.person import Person
+from app.models.person import Person, GenderEnum
+from app.models.tree_person import TreePerson
 from app.models.user import User
-from typing import List, Optional
+from app.schemas.person import PersonCreate, PersonResponse, PersonUpdate, PersonSearchResponse
+from app.services.access_service import check_tree_access
 
-router = APIRouter(prefix="/persons", tags=["Persons"])
+router = APIRouter(prefix="/persons/trees/{tree_id}", tags=["Persons"])
 
-
-@router.get("/persons/search", response_model=List[PersonSearchResponse])
-async def search_persons(
-        q: str = Query(..., min_length=1, description="Поисковый запрос"),
-        limit: int = Query(20, ge=1, le=100, description="Максимальное количество результатов"),
-        db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(get_current_user)
-):
-    """Нечеткий поиск персон по базе данных."""
-    results = await person_service.search_persons(db, q, limit)
-    return results
+UPLOAD_DIR = Path("/app/app/uploads/photos")
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 МБ
 
 
-@router.post("/trees/{tree_id}/persons/", response_model=PersonAddResponse, status_code=status.HTTP_200_OK)
-async def add_person_to_tree(
-        tree_id: UUID,
-        person_in: PersonCreate,
-        force_create: bool = Query(False, description="Игнорировать предупреждения о дублях"),
-        db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(get_current_user)
-):
-    """Добавляет персону в дерево с проверкой дублей."""
-    tree_result = await db.execute(select(Tree).where(Tree.id == tree_id))
-    tree = tree_result.scalar_one_or_none()
-    if not tree:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Дерево не найдено")
-
-    has_access = await access_service.check_tree_access(db, tree_id, current_user.id)
-    if not has_access:
+def _validate_image(file: UploadFile) -> None:
+    """Проверяет тип и размер файла."""
+    if file.content_type not in ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="У вас нет доступа к этому дереву"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Недопустимый тип файла: {file.content_type}. Разрешены только изображения."
+        )
+    if file.size and file.size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Файл слишком большой. Максимальный размер: {MAX_FILE_SIZE // 1024 // 1024} МБ"
         )
 
-    result = await person_service.add_person_to_tree(
-        db=db,
-        tree_id=tree_id,
-        requester_id=current_user.id,
-        person_in=person_in,
-        force_create=force_create
-    )
-    return result
+
+def _get_extension(filename: str) -> str:
+    """Получает расширение файла."""
+    return Path(filename).suffix.lower() if filename else ".jpg"
 
 
-@router.post("/persons/{person_id}/photo", response_model=dict, status_code=status.HTTP_200_OK)
-async def upload_person_photo(
-        person_id: UUID,
-        file: UploadFile = File(..., description="Фотография персоны (JPEG, PNG, WebP, макс. 5 МБ)"),
+@router.get("/", response_model=list[PersonResponse])
+async def get_tree_persons(
+        tree_id: UUID,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """
-    Загружает фотографию для персоны.
-    Старое фото (если было) автоматически удаляется.
-    """
-    # 1. Проверяем, что персона существует
-    person_result = await db.execute(select(Person).where(Person.id == person_id))
-    person = person_result.scalar_one_or_none()
+    """Получить всех персон дерева."""
+    if not await check_tree_access(db, tree_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет доступа к дереву")
+
+    result = await db.execute(
+        select(Person)
+        .join(TreePerson, TreePerson.person_id == Person.id)
+        .where(TreePerson.tree_id == tree_id)
+        .order_by(Person.last_name, Person.first_name)
+    )
+    return result.scalars().all()
+
+
+@router.post("/", response_model=PersonResponse, status_code=status.HTTP_201_CREATED)
+async def create_person(
+        tree_id: UUID,
+        person_data: PersonCreate,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """Создать новую персону в дереве."""
+    if not await check_tree_access(db, tree_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет доступа к дереву")
+
+    person_id = uuid.uuid4()
+    new_person = Person(
+        id=person_id,
+        first_name=person_data.first_name,
+        last_name=person_data.last_name,
+        maiden_name=person_data.maiden_name,
+        middle_name=person_data.middle_name,
+        birth_date=person_data.birth_date,
+        birth_place=person_data.birth_place,
+        death_date=person_data.death_date,
+        death_place=person_data.death_place,
+        burial_place=person_data.burial_place,
+        gender=GenderEnum(person_data.gender) if person_data.gender else None,
+        photo_url=person_data.photo_url,
+        created_by=current_user.id
+    )
+    db.add(new_person)
+    db.add(TreePerson(tree_id=tree_id, person_id=person_id, added_by=current_user.id))
+    await db.commit()
+    await db.refresh(new_person)
+    return new_person
+
+
+@router.get("/{person_id}", response_model=PersonResponse)
+async def get_person(
+        tree_id: UUID,
+        person_id: UUID,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """Получить персону по ID."""
+    if not await check_tree_access(db, tree_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет доступа к дереву")
+
+    result = await db.execute(
+        select(Person).where(
+            Person.id == person_id,
+            TreePerson.tree_id == tree_id,
+            TreePerson.person_id == Person.id
+        )
+    )
+    person = result.scalar_one_or_none()
+    if not person:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Персона не найдена")
+    return person
+
+
+@router.put("/{person_id}", response_model=PersonResponse)
+async def update_person(
+        tree_id: UUID,
+        person_id: UUID,
+        person_data: PersonUpdate,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """Обновить данные персоны."""
+    if not await check_tree_access(db, tree_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет доступа к дереву")
+
+    result = await db.execute(
+        select(Person).where(
+            Person.id == person_id,
+            TreePerson.tree_id == tree_id,
+            TreePerson.person_id == Person.id
+        )
+    )
+    person = result.scalar_one_or_none()
     if not person:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Персона не найдена")
 
-    # 2. Проверяем права доступа
-    has_access = await access_service.check_person_access(db, person_id, current_user.id)
-    if not has_access:
+    update_data = person_data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if field == "gender" and value is not None:
+            setattr(person, field, GenderEnum(value))
+        else:
+            setattr(person, field, value)
+
+    await db.commit()
+    await db.refresh(person)
+    return person
+
+
+@router.delete("/{person_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_person(
+        tree_id: UUID,
+        person_id: UUID,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """Удалить персону из дерева."""
+    if not await check_tree_access(db, tree_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет доступа к дереву")
+
+    result = await db.execute(
+        select(Person).where(
+            Person.id == person_id,
+            TreePerson.tree_id == tree_id,
+            TreePerson.person_id == Person.id
+        )
+    )
+    person = result.scalar_one_or_none()
+    if not person:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Персона не найдена")
+
+    # Удаляем фото если есть
+    if person.photo_url:
+        photo_path = UPLOAD_DIR / person.photo_url.split("/")[-1]
+        if photo_path.exists():
+            photo_path.unlink()
+
+    await db.delete(person)
+    await db.commit()
+
+
+@router.get("/search", response_model=list[PersonSearchResponse])
+async def search_persons(
+        tree_id: UUID,
+        q: str = "",
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """Поиск персон по имени/фамилии."""
+    if not await check_tree_access(db, tree_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет доступа к дереву")
+
+    search_term = f"%{q}%"
+    result = await db.execute(
+        select(Person)
+        .join(TreePerson, TreePerson.person_id == Person.id)
+        .where(
+            TreePerson.tree_id == tree_id,
+            (Person.first_name.ilike(search_term) | Person.last_name.ilike(search_term))
+        )
+        .order_by(Person.last_name, Person.first_name)
+    )
+    return result.scalars().all()
+
+
+# === ФОТОГРАФИИ ПЕРСОН ===
+
+@router.post("/{person_id}/photo", status_code=status.HTTP_200_OK)
+async def upload_person_photo(
+        tree_id: UUID,
+        person_id: UUID,
+        file: UploadFile = File(...),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """Загрузить фотографию персоны."""
+    if not await check_tree_access(db, tree_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет доступа к дереву")
+
+    # Проверяем существование персоны
+    result = await db.execute(
+        select(Person).where(
+            Person.id == person_id,
+            TreePerson.tree_id == tree_id,
+            TreePerson.person_id == Person.id
+        )
+    )
+    person = result.scalar_one_or_none()
+    if not person:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Персона не найдена")
+
+    # Валидация файла
+    _validate_image(file)
+
+    # Генерируем уникальное имя файла
+    ext = _get_extension(file.filename)
+    unique_filename = f"{person_id}{ext}"
+    file_path = UPLOAD_DIR / unique_filename
+
+    # Создаем директорию если не существует
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Удаляем старое фото если есть
+    if person.photo_url:
+        old_photo_path = UPLOAD_DIR / person.photo_url.split("/")[-1]
+        if old_photo_path.exists():
+            old_photo_path.unlink()
+
+    # Сохраняем файл
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="У вас нет доступа к этой персоне"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Файл слишком большой. Максимальный размер: {MAX_FILE_SIZE // 1024 // 1024} МБ"
         )
 
-    # 3. Удаляем старое фото (если есть)
-    if person.photo_url:
-        photo_service.delete_photo(person.photo_url)
+    with open(file_path, "wb") as f:
+        f.write(content)
 
-    # 4. Сохраняем новое фото
-    photo_url = await photo_service.save_photo(file)
-
-    # 5. Обновляем запись в БД
-    person.photo_url = photo_url
+    # Обновляем URL в БД
+    person.photo_url = f"uploads/photos/{unique_filename}"
     await db.commit()
+    await db.refresh(person)
 
     return {
         "message": "Фото успешно загружено",
-        "photo_url": photo_url
+        "photo_url": person.photo_url
     }
 
 
-@router.delete("/persons/{person_id}/photo", response_model=dict)
-async def delete_person_photo(
+@router.get("/{person_id}/photo")
+async def get_person_photo(
+        tree_id: UUID,
         person_id: UUID,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """Удаляет фотографию персоны."""
-    person_result = await db.execute(select(Person).where(Person.id == person_id))
-    person = person_result.scalar_one_or_none()
+    """Получить фотографию персоны."""
+    from fastapi.responses import FileResponse
+
+    if not await check_tree_access(db, tree_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет доступа к дереву")
+
+    result = await db.execute(
+        select(Person).where(
+            Person.id == person_id,
+            TreePerson.tree_id == tree_id,
+            TreePerson.person_id == Person.id
+        )
+    )
+    person = result.scalar_one_or_none()
     if not person:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Персона не найдена")
 
-    has_access = await access_service.check_person_access(db, person_id, current_user.id)
-    if not has_access:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="У вас нет доступа к этой персоне"
-        )
+    if not person.photo_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Фото не загружено")
 
-    if person.photo_url:
-        photo_service.delete_photo(person.photo_url)
-        person.photo_url = None
-        await db.commit()
-        return {"message": "Фото успешно удалено"}
+    photo_path = UPLOAD_DIR / person.photo_url.split("/")[-1]
+    if not photo_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл фото не найден на диске")
 
-    return {"message": "У персоны не было фото"}
+    return FileResponse(
+        path=str(photo_path),
+        media_type="image/jpeg",
+        headers={"Content-Disposition": f"inline; filename={photo_path.name}"}
+    )
 
 
-
-
-@router.patch("/{person_id}", response_model=dict)
-async def update_person(
-    person_id: UUID,
-    person_in: PersonUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Обновляет данные персоны."""
-    try:
-        person = await person_service.update_person(db, person_id, current_user.id, person_in)
-        return {"message": "Персона успешно обновлена", "person_id": str(person.id)}
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-@router.delete("/{person_id}", response_model=dict)
-async def delete_person(
-    person_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Удаляет персону и все связанные данные."""
-    try:
-        await person_service.delete_person(db, person_id, current_user.id)
-        return {"message": "Персона успешно удалена"}
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-
-@router.patch("/{person_id}", response_model=dict)
-async def update_person(
-    person_id: UUID,
-    person_in: PersonUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Обновляет данные персоны."""
-    try:
-        person = await person_service.update_person(db, person_id, current_user.id, person_in)
-        return {"message": "Персона успешно обновлена", "person_id": str(person.id)}
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-@router.delete("/{person_id}", response_model=dict)
-async def delete_person(
-    person_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Удаляет персону и все связанные данные (связи, события)."""
-    try:
-        await person_service.delete_person(db, person_id, current_user.id)
-        return {"message": "Персона успешно удалена"}
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.get("/trees/{tree_id}/search", response_model=list[dict])
-async def search_persons(
+@router.delete("/{person_id}/photo", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_person_photo(
         tree_id: UUID,
-        q: Optional[str] = Query(None, description="Поиск по имени, фамилии или месту"),
-        birth_year: Optional[int] = Query(None, description="Год рождения (например, 1990)"),
-        birth_place: Optional[str] = Query(None, description="Место рождения"),
-        gender: Optional[str] = Query(None, description="Пол: male, female или unknown"),
+        person_id: UUID,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """Расширенный поиск персон внутри конкретного дерева."""
-    try:
-        from app.services.person_service import search_persons_in_tree
-        persons = await search_persons_in_tree(
-            db=db,
-            tree_id=tree_id,
-            user_id=current_user.id,
-            q=q,
-            birth_year=birth_year,
-            birth_place=birth_place,
-            gender=gender
-        )
+    """Удалить фотографию персоны."""
+    if not await check_tree_access(db, tree_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет доступа к дереву")
 
-        # Форматируем ответ в простой словарь для JSON
-        return [
-            {
-                "id": str(p.id),
-                "first_name": p.first_name,
-                "last_name": p.last_name,
-                "middle_name": p.middle_name,
-                "birth_date": p.birth_date.isoformat() if p.birth_date else None,
-                "birth_place": p.birth_place,
-                "gender": p.gender.value if p.gender else None,
-                "photo_url": p.photo_url
-            }
-            for p in persons
-        ]
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    result = await db.execute(
+        select(Person).where(
+            Person.id == person_id,
+            TreePerson.tree_id == tree_id,
+            TreePerson.person_id == Person.id
+        )
+    )
+    person = result.scalar_one_or_none()
+    if not person:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Персона не найдена")
+
+    if not person.photo_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Фото не загружено")
+
+    # Удаляем файл с диска
+    photo_path = UPLOAD_DIR / person.photo_url.split("/")[-1]
+    if photo_path.exists():
+        photo_path.unlink()
+
+    # Очищаем поле в БД
+    person.photo_url = None
+    await db.commit()

@@ -1,11 +1,13 @@
 import os
 
-content = '''import io
+content = '''# -*- coding: utf-8 -*-
+import io
 import os
 import traceback
 from uuid import UUID
 from datetime import datetime, date
-from typing import List, Optional
+from typing import List, Dict, Optional
+from collections import defaultdict
 
 from fpdf import FPDF
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,12 +15,13 @@ from sqlalchemy import select
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import numpy as np
 
 from app.models.tree import Tree
-from app.models.person import Person
+from app.models.person import Person, GenderEnum
 from app.models.tree_person import TreePerson
-from app.models.relation import Relation
+from app.models.relation import Relation, RelationTypeEnum
 from app.models.life_event import LifeEvent
 from app.services.access_service import check_tree_access
 
@@ -28,7 +31,6 @@ LOGO_PATH = "/app/app/assets/logo.png"
 
 
 def _calculate_age(birth_date: Optional[date], death_date: Optional[date]) -> Optional[int]:
-    """Вычисляет возраст персоны."""
     if not birth_date:
         return None
     end_date = death_date or date.today()
@@ -39,7 +41,6 @@ def _calculate_age(birth_date: Optional[date], death_date: Optional[date]) -> Op
 
 
 def _get_age_suffix(age: int) -> str:
-    """Возвращает правильное склонение слова 'лет/год/года'."""
     if 11 <= age % 100 <= 14:
         return " лет"
     last_digit = age % 10
@@ -52,7 +53,6 @@ def _get_age_suffix(age: int) -> str:
 
 
 def _format_full_name(person: Person) -> str:
-    """Форматирует имя с учетом девичьей фамилии для женщин."""
     last_name = str(person.last_name) if person.last_name else "Неизвестно"
     first_name = str(person.first_name) if person.first_name else "Неизвестно"
     middle_name = str(person.middle_name) if person.middle_name else ""
@@ -73,46 +73,44 @@ def _format_full_name(person: Person) -> str:
 
 
 def _generate_family_graph(persons: List[Person], relations: List[Relation]):
-    """Генерирует круговой граф семьи."""
     try:
         fig, ax = plt.subplots(figsize=(10, 8))
         n = len(persons)
         if n == 0:
             return None
-
         angles = np.linspace(0, 2 * np.pi, n, endpoint=False)
         radius = 3
-
         positions = {}
         for i, person in enumerate(persons):
             x = float(radius * np.cos(angles[i]))
             y = float(radius * np.sin(angles[i]))
             positions[person.id] = (x, y)
-
             gender_val = str(person.gender).lower() if person.gender else ""
             color = '#3498db' if 'male' in gender_val else '#e74c3c'
             circle = plt.Circle((x, y), 0.3, color=color, alpha=0.7, zorder=2)
             ax.add_patch(circle)
-
             name = f"{str(person.first_name)}\\n{str(person.last_name)}"
-            ax.text(x, y, name, ha='center', va='center', fontsize=8, fontweight='bold', zorder=3)
-
+            ax.text(x, y, str(name), ha='center', va='center', fontsize=8, fontweight='bold', zorder=3)
         for rel in relations:
             if rel.person_1_id in positions and rel.person_2_id in positions:
                 x1, y1 = positions[rel.person_1_id]
                 x2, y2 = positions[rel.person_2_id]
-
                 rel_type = str(rel.type).lower()
                 if 'spouse' in rel_type:
                     ax.plot([x1, x2], [y1, y2], 'k-', linewidth=2, alpha=0.6, zorder=1)
                 else:
                     ax.plot([x1, x2], [y1, y2], 'g--', linewidth=1.5, alpha=0.6, zorder=1)
-
         ax.set_xlim(-4, 4)
         ax.set_ylim(-4, 4)
         ax.set_aspect('equal')
         ax.axis('off')
-
+        legend_elements = [
+            mpatches.Patch(color='#3498db', label='Мужчина'),
+            mpatches.Patch(color='#e74c3c', label='Женщина'),
+            plt.Line2D([0], [0], color='k', linewidth=2, label='Супруги'),
+            plt.Line2D([0], [0], color='g', linestyle='--', linewidth=1.5, label='Родитель-ребёнок')
+        ]
+        ax.legend(handles=legend_elements, loc='upper right', fontsize=9)
         ax.set_title('Граф семьи', fontsize=16, fontweight='bold', pad=20)
         return fig
     except Exception as e:
@@ -120,14 +118,12 @@ def _generate_family_graph(persons: List[Person], relations: List[Relation]):
         return None
 
 
-def _add_person_card(pdf: FPDF, person: Person, relations: List[Relation],
-                     all_persons: List[Person], life_events: List[LifeEvent]):
-    """Добавляет страницу с карточкой персоны."""
+def _add_person_card(pdf: FPDF, person: Person, relations: List[Relation], all_persons: List[Person], life_events: List[LifeEvent]):
     pdf.set_font('DejaVu', 'B', 20)
     pdf.set_text_color(44, 62, 80)
 
     full_name = _format_full_name(person)
-    pdf.cell(0, 15, full_name, 0, 1, 'L')
+    pdf.cell(0, 15, str(full_name), 0, 1, 'L')
 
     if person.photo_url:
         photo_path = f"/app/{str(person.photo_url).lstrip('/')}"
@@ -152,23 +148,23 @@ def _add_person_card(pdf: FPDF, person: Person, relations: List[Relation],
             gender_text = "Мужской"
         elif gender_val == 'female':
             gender_text = "Женский"
-    pdf.cell(100, 8, f"Пол: {gender_text}", 0, 1)
+    pdf.cell(100, 8, str(f"Пол: {gender_text}"), 0, 1)
 
-    birth_text = person.birth_date.strftime("%d.%m.%Y") if person.birth_date else "—"
-    pdf.cell(100, 8, f"Дата рождения: {birth_text}", 0, 1)
+    birth_text = str(person.birth_date.strftime("%d.%m.%Y")) if person.birth_date else "—"
+    pdf.cell(100, 8, str(f"Дата рождения: {birth_text}"), 0, 1)
 
     birth_place = str(person.birth_place) if person.birth_place else "—"
-    pdf.cell(100, 8, f"Место рождения: {birth_place}", 0, 1)
+    pdf.cell(100, 8, str(f"Место рождения: {birth_place}"), 0, 1)
 
     age = _calculate_age(person.birth_date, person.death_date)
     if age and 0 < age < 120:
-        pdf.cell(100, 8, f"Возраст: {age}{_get_age_suffix(age)}", 0, 1)
+        pdf.cell(100, 8, str(f"Возраст: {age}{_get_age_suffix(age)}"), 0, 1)
 
     if person.death_date:
-        death_text = person.death_date.strftime("%d.%m.%Y")
-        pdf.cell(100, 8, f"Дата смерти: {death_text}", 0, 1)
+        death_text = str(person.death_date.strftime("%d.%m.%Y"))
+        pdf.cell(100, 8, str(f"Дата смерти: {death_text}"), 0, 1)
         if hasattr(person, 'burial_place') and person.burial_place:
-            pdf.cell(100, 8, f"Место погребения: {person.burial_place}", 0, 1)
+            pdf.cell(100, 8, str(f"Место погребения: {person.burial_place}"), 0, 1)
 
     pdf.ln(10)
 
@@ -197,7 +193,7 @@ def _add_person_card(pdf: FPDF, person: Person, relations: List[Relation],
         if related_person:
             has_relations = True
             related_name = _format_full_name(related_person)
-            pdf.cell(0, 8, f"• {relation_type_text}: {related_name}", 0, 1)
+            pdf.cell(0, 8, str(f"• {relation_type_text}: {related_name}"), 0, 1)
 
     if not has_relations:
         pdf.cell(0, 8, "• Связи не указаны", 0, 1)
@@ -208,7 +204,6 @@ def _add_person_card(pdf: FPDF, person: Person, relations: List[Relation],
         pdf.set_font('DejaVu', 'B', 14)
         pdf.set_text_color(44, 62, 80)
         pdf.cell(0, 10, 'Жизненные события:', 0, 1)
-
         pdf.set_font('DejaVu', '', 11)
         pdf.set_text_color(52, 73, 94)
 
@@ -230,7 +225,7 @@ def _add_person_card(pdf: FPDF, person: Person, relations: List[Relation],
             approx_str = " (приблизительно)" if event.date_approx else ""
 
             line = f"• {event_name}: {date_str}{approx_str}{place_str}{desc_str}"
-            pdf.cell(0, 8, line, 0, 1)
+            pdf.cell(0, 8, str(line), 0, 1)
 
 
 class FamilyBookPDF(FPDF):
@@ -242,15 +237,15 @@ class FamilyBookPDF(FPDF):
         if self.page_no() > 1:
             self.set_font('DejaVu', '', 8)
             self.set_text_color(128, 128, 128)
-            self.cell(0, 10, f'Книга рода: {self.tree_name}', 0, 0, 'L')
-            self.cell(0, 10, f'Стр. {self.page_no()}', 0, 1, 'R')
+            self.cell(0, 10, str(f'Книга рода: {self.tree_name}'), 0, 0, 'L')
+            self.cell(0, 10, str(f'Стр. {self.page_no()}'), 0, 1, 'R')
             self.ln(5)
 
     def footer(self):
         self.set_y(-15)
         self.set_font('DejaVu', '', 8)
         self.set_text_color(128, 128, 128)
-        self.cell(0, 10, f'Создано в Исток API • {datetime.now().strftime("%d.%m.%Y")}', 0, 0, 'C')
+        self.cell(0, 10, str(f'Создано в Исток API • {datetime.now().strftime("%d.%m.%Y")}'), 0, 0, 'C')
 
 
 async def generate_family_book_pdf(
@@ -258,7 +253,6 @@ async def generate_family_book_pdf(
     tree_id: UUID,
     user_id: UUID
 ) -> bytes:
-    """Генерирует PDF-книгу рода."""
     try:
         tree_result = await db.execute(select(Tree).where(Tree.id == tree_id))
         tree = tree_result.scalar_one_or_none()
@@ -297,16 +291,15 @@ async def generate_family_book_pdf(
             pdf.add_font('DejaVu', 'B', FONT_PATH_BOLD, uni=True)
 
         pdf.add_page()
-
         if os.path.exists(LOGO_PATH):
             try:
-                pdf.image(LOGO_PATH, x=75, y=30, w=60)
+                pdf.image(LOGO_PATH, x=75, y=20, w=60)
             except Exception as e:
                 print(f"Ошибка добавления логотипа: {e}")
 
+        pdf.set_y(100)
         pdf.set_font('DejaVu', 'B', 32)
         pdf.set_text_color(44, 62, 80)
-        pdf.ln(70)
         pdf.cell(0, 20, str(tree.name), 0, 1, 'C')
 
         pdf.set_font('DejaVu', '', 16)
@@ -316,16 +309,16 @@ async def generate_family_book_pdf(
 
         pdf.set_font('DejaVu', '', 12)
         pdf.set_text_color(52, 73, 94)
-        pdf.cell(0, 10, f'Количество персон: {len(persons)}', 0, 1, 'C')
-        pdf.cell(0, 10, f'Количество связей: {len(relations)}', 0, 1, 'C')
+        pdf.cell(0, 10, str(f'Количество персон: {len(persons)}'), 0, 1, 'C')
+        pdf.cell(0, 10, str(f'Количество связей: {len(relations)}'), 0, 1, 'C')
 
         created_at_str = tree.created_at.strftime("%d.%m.%Y") if tree.created_at else "—"
-        pdf.cell(0, 10, f'Дата создания: {created_at_str}', 0, 1, 'C')
+        pdf.cell(0, 10, str(f'Дата создания: {created_at_str}'), 0, 1, 'C')
 
         pdf.ln(10)
         pdf.set_font('DejaVu', '', 10)
         pdf.set_text_color(127, 140, 141)
-        pdf.cell(0, 10, f'Создано в Исток API • {datetime.now().strftime("%d.%m.%Y")}', 0, 1, 'C')
+        pdf.cell(0, 10, str(f'Создано в Исток API • {datetime.now().strftime("%d.%m.%Y")}'), 0, 1, 'C')
 
         if persons:
             graph_image = _generate_family_graph(persons, relations)
@@ -365,4 +358,4 @@ file_path = os.path.join('app', 'services', 'pdf_export_service.py')
 with open(file_path, 'w', encoding='utf-8') as f:
     f.write(content)
 
-print(f"Файл {file_path} успешно создан!")
+print(f"✅ Файл {file_path} успешно создан с правильными отступами!")

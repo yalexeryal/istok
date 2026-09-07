@@ -27,7 +27,8 @@ RUN pip install --upgrade pip && \
 COPY --chown=istok_user:istok_user . .
 
 # Создаем папку для логов и меняем владельца
-RUN mkdir -p /app/logs && chown -R istok_user:istok_user /app
+RUN mkdir -p /app/logs /app/app/uploads/photos && \
+    chown -R istok_user:istok_user /app
 
 # Переключаемся на небезопасного пользователя
 USER istok_user
