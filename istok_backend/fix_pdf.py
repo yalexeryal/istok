@@ -1,4 +1,6 @@
-import io
+import os
+
+content = '''import io
 import os
 import traceback
 from uuid import UUID
@@ -92,7 +94,7 @@ def _generate_family_graph(persons: List[Person], relations: List[Relation]):
             circle = plt.Circle((x, y), 0.3, color=color, alpha=0.7, zorder=2)
             ax.add_patch(circle)
 
-            name = f"{str(person.first_name)}\n{str(person.last_name)}"
+            name = f"{str(person.first_name)}\\n{str(person.last_name)}"
             ax.text(x, y, name, ha='center', va='center', fontsize=8, fontweight='bold', zorder=3)
 
         for rel in relations:
@@ -355,5 +357,12 @@ async def generate_family_book_pdf(
 
     except Exception as e:
         tb = traceback.format_exc()
-        print(f"=== PDF GENERATION ERROR ===\n{tb}\n==============================")
-        raise ValueError(f"Ошибка генерации PDF: {str(e)}\n\nТрассировка:\n{tb}")
+        print(f"=== PDF GENERATION ERROR ===\\n{tb}\\n==============================")
+        raise ValueError(f"Ошибка генерации PDF: {str(e)}\\n\\nТрассировка:\\n{tb}")
+'''
+
+file_path = os.path.join('app', 'services', 'pdf_export_service.py')
+with open(file_path, 'w', encoding='utf-8') as f:
+    f.write(content)
+
+print(f"Файл {file_path} успешно создан!")
