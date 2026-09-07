@@ -34,7 +34,7 @@ async def import_gedcom_to_tree(
     # 3. Парсинг персон (INDI)
     for element in elements:
         if element.get_tag() == 'INDI':
-            gedcom_id = element.get_pointer()  # Например, "@I1@"
+            gedcom_id = element.get_pointer()
 
             # Извлекаем имя (возвращает кортеж: (имя, фамилия))
             name = element.get_name()
@@ -45,12 +45,18 @@ async def import_gedcom_to_tree(
                 first_name = "Неизвестно"
                 last_name = "Неизвестно"
 
+            # Извлекаем девичью фамилию из тега _MARNM (married name)
+            maiden_name = None
+            for child in element.get_child_elements():
+                if child.get_tag() == '_MARNM':
+                    maiden_name = child.get_value().strip("/")
+                    break
+
             # Извлекаем дату и место рождения
             birth_data = element.get_birth_data()
             birth_date_str = birth_data[0] if birth_data and len(birth_data) > 0 and birth_data[0] else None
             birth_place = birth_data[1] if birth_data and len(birth_data) > 1 and birth_data[1] else None
 
-            # Преобразуем дату (простой парсинг)
             birth_date = None
             if birth_date_str:
                 try:
@@ -74,18 +80,18 @@ async def import_gedcom_to_tree(
                 id=person_id,
                 first_name=first_name,
                 last_name=last_name,
+                maiden_name=maiden_name,  # Новое поле
                 birth_date=birth_date,
                 birth_place=birth_place,
                 gender=gender,
-                created_by=user_id  # <-- ИСПРАВЛЕНО: добавлено обязательное поле
+                created_by=user_id
             )
             db.add(new_person)
 
-            # Привязываем персону к дереву
             db.add(TreePerson(tree_id=tree_id, person_id=person_id, added_by=user_id))
             stats["persons_created"] += 1
 
-    await db.flush()  # Получаем реальные ID перед созданием связей
+    await db.flush()
 
     # 4. Парсинг семей (FAM) для создания связей
     for element in elements:
@@ -93,8 +99,8 @@ async def import_gedcom_to_tree(
             husband_ptr = None
             wife_ptr = None
             children_ptrs = []
+            marriage_date_str = None
 
-            # Проходим по дочерним элементам семьи
             for child in element.get_child_elements():
                 tag = child.get_tag()
                 value = child.get_value()
@@ -104,6 +110,23 @@ async def import_gedcom_to_tree(
                     wife_ptr = value
                 elif tag == 'CHIL':
                     children_ptrs.append(value)
+                elif tag == 'MARR':
+                    # Ищем дату брака внутри MARR
+                    for sub_child in child.get_child_elements():
+                        if sub_child.get_tag() == 'DATE':
+                            marriage_date_str = sub_child.get_value()
+                            break
+
+            # Парсим дату брака
+            marriage_date = None
+            if marriage_date_str:
+                try:
+                    marriage_date = datetime.strptime(marriage_date_str, "%d %b %Y").date()
+                except ValueError:
+                    try:
+                        marriage_date = datetime.strptime(marriage_date_str, "%Y").date()
+                    except ValueError:
+                        pass
 
             # Связь "Супруги"
             if husband_ptr and wife_ptr:
@@ -111,7 +134,6 @@ async def import_gedcom_to_tree(
                 wife_id = id_mapping.get(wife_ptr)
 
                 if husband_id and wife_id:
-                    # Проверяем, не создана ли уже такая связь
                     exists = await db.execute(
                         select(Relation).where(
                             ((Relation.person_1_id == husband_id) & (Relation.person_2_id == wife_id)) |
@@ -120,10 +142,11 @@ async def import_gedcom_to_tree(
                     )
                     if not exists.scalar_one_or_none():
                         db.add(Relation(
-                            person_1_id=husband_id,  # <-- ИСПРАВЛЕНО: person_1_id
-                            person_2_id=wife_id,  # <-- ИСПРАВЛЕНО: person_2_id
-                            type=RelationTypeEnum.SPOUSE,  # <-- ИСПРАВЛЕНО: type вместо relation_type
-                            created_by=user_id  # <-- ИСПРАВЛЕНО: добавлено обязательное поле
+                            person_1_id=husband_id,
+                            person_2_id=wife_id,
+                            type=RelationTypeEnum.SPOUSE,
+                            event_date=marriage_date,  # Дата брака
+                            created_by=user_id
                         ))
                         stats["relations_created"] += 1
 
@@ -133,27 +156,25 @@ async def import_gedcom_to_tree(
                 if not child_id:
                     continue
 
-                # Если есть отец
                 if husband_ptr:
                     father_id = id_mapping.get(husband_ptr)
                     if father_id:
                         db.add(Relation(
-                            person_1_id=father_id,  # <-- ИСПРАВЛЕНО
-                            person_2_id=child_id,  # <-- ИСПРАВЛЕНО
-                            type=RelationTypeEnum.PARENT_CHILD,  # <-- ИСПРАВЛЕНО
-                            created_by=user_id  # <-- ИСПРАВЛЕНО
+                            person_1_id=father_id,
+                            person_2_id=child_id,
+                            type=RelationTypeEnum.PARENT_CHILD,
+                            created_by=user_id
                         ))
                         stats["relations_created"] += 1
 
-                # Если есть мать
                 if wife_ptr:
                     mother_id = id_mapping.get(wife_ptr)
                     if mother_id:
                         db.add(Relation(
-                            person_1_id=mother_id,  # <-- ИСПРАВЛЕНО
-                            person_2_id=child_id,  # <-- ИСПРАВЛЕНО
-                            type=RelationTypeEnum.PARENT_CHILD,  # <-- ИСПРАВЛЕНО
-                            created_by=user_id  # <-- ИСПРАВЛЕНО
+                            person_1_id=mother_id,
+                            person_2_id=child_id,
+                            type=RelationTypeEnum.PARENT_CHILD,
+                            created_by=user_id
                         ))
                         stats["relations_created"] += 1
 
