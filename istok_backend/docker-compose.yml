@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: istok_db
+    restart: always
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: istok_user
+      POSTGRES_PASSWORD: istok_password
+      POSTGRES_DB: istok_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql   # <-- ДОБАВЬТЕ ЭТУ СТРОКУ
+
+volumes:
+  postgres_data:
