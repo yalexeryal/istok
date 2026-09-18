@@ -22,12 +22,15 @@ class PersonBase(BaseModel):
     tree_id: Optional[int] = 1
 
 class PersonCreate(PersonBase):
-    # Добавляем поля для удобства создания связей при регистрации персоны
     father_id: Optional[int] = None
     mother_id: Optional[int] = None
+    skip_duplicate_check: Optional[bool] = False
 
 class PersonResponse(PersonBase):
     id: int
+    status: str = "sandbox"
+    merged_into_id: Optional[int] = None
+    potential_duplicates: Optional[list] = None
     created_at: datetime
     updated_at: datetime
     updated_by_id: Optional[int] = None

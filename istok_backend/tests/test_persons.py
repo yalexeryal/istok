@@ -193,3 +193,88 @@ async def test_patronymic_different_cultures(client: AsyncClient):
         "first_name": "Björk", "gender": "female", "tree_id": 1, "father_id": f_is_id, "culture": "is"
     })
     assert res_daughter_is.json()["middle_name"] == "Jóndóttir"
+
+
+@pytest.mark.asyncio
+async def test_sandbox_and_duplicate_detection(client: AsyncClient):
+    """
+    Тест проверяет:
+    1. Новая персона попадает в песочницу (status=sandbox)
+    2. Система находит похожих персон
+    3. Можно подтвердить персону (перевести в confirmed)
+    4. Можно слить с дубликатом (перевести в merged)
+    """
+    # 1. Создаем первую персону и подтверждаем её
+    person1_data = {
+        "first_name": "Иван",
+        "last_name": "Петров",
+        "birth_date": "1970-05-15",
+        "birth_place": "Москва",
+        "gender": "male",
+        "tree_id": 1,
+        "skip_duplicate_check": True  # Пропускаем проверку для первой
+    }
+    res1 = await client.post("/persons/", json=person1_data)
+    assert res1.status_code == 201
+    person1_id = res1.json()["id"]
+
+    # Подтверждаем первую персону
+    res_confirm1 = await client.post(f"/persons/{person1_id}/confirm")
+    assert res_confirm1.status_code == 200
+    assert res_confirm1.json()["status"] == "confirmed"
+
+    # 2. Создаем вторую похожую персону (должна попасть в песочницу и найти дубликат)
+    person2_data = {
+        "first_name": "Иван",
+        "last_name": "Петров",
+        "birth_date": "1971-05-15",  # Разница в 1 год
+        "birth_place": "Москва",
+        "gender": "male",
+        "tree_id": 1
+    }
+    res2 = await client.post("/persons/", json=person2_data)
+    assert res2.status_code == 201
+    person2_id = res2.json()["id"]
+
+    # Проверяем, что вторая персона в песочнице
+    assert res2.json()["status"] == "sandbox"
+
+    # Проверяем, что нашли дубликат
+    duplicates = res2.json().get("potential_duplicates", [])
+    assert len(duplicates) > 0, "Дубликат не найден!"
+    assert duplicates[0]["id"] == person1_id
+    assert duplicates[0]["similarity_score"] >= 50
+
+    # 3. Подтверждаем вторую персону (что это не дубликат)
+    res_confirm2 = await client.post(f"/persons/{person2_id}/confirm")
+    assert res_confirm2.status_code == 200
+    assert res_confirm2.json()["status"] == "confirmed"
+
+    # 4. Создаем третью похожую персону и сливаем с первой
+    person3_data = {
+        "first_name": "Иван",
+        "last_name": "Петров",
+        "birth_date": "1970-05-15",
+        "birth_place": "Москва",
+        "gender": "male",
+        "tree_id": 1
+    }
+    res3 = await client.post("/persons/", json=person3_data)
+    assert res3.status_code == 201
+    person3_id = res3.json()["id"]
+
+    # Сливаем третью с первой
+    res_merge = await client.post(f"/persons/{person3_id}/merge/{person1_id}")
+    assert res_merge.status_code == 200
+    assert res_merge.json()["status"] == "merged"
+    assert res_merge.json()["merged_into_id"] == person1_id
+
+    # 5. Проверяем, что в списке confirmed только первая и вторая
+    res_list = await client.get("/persons/?tree_id=1&status=confirmed")
+    assert res_list.status_code == 200
+    confirmed_persons = res_list.json()
+    assert len(confirmed_persons) == 2
+    confirmed_ids = [p["id"] for p in confirmed_persons]
+    assert person1_id in confirmed_ids
+    assert person2_id in confirmed_ids
+    assert person3_id not in confirmed_ids  # Слитая не должна быть в списке

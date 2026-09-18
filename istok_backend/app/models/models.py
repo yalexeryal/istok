@@ -64,6 +64,10 @@ class Person(Base):
     photo_url = Column(String(500), nullable=True)
     notes = Column(Text, nullable=True)
     tree_id = Column(Integer, nullable=False, default=1, index=True)
+
+    status = Column(String(20), nullable=False, default="sandbox", index=True)  # sandbox, confirmed, merged
+    merged_into_id = Column(Integer, ForeignKey('persons.id'), nullable=True)  # Ссылка на персону, в которую слили
+
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     updated_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)
@@ -71,6 +75,8 @@ class Person(Base):
     life_events = relationship("LifeEvent", back_populates="person", cascade="all, delete-orphan",
                                foreign_keys="LifeEvent.person_id")
     updater = relationship("User", foreign_keys=[updated_by_id])
+    merged_into = relationship("Person", remote_side=[id], foreign_keys=[merged_into_id])
+
     @property
     def full_name_display(self) -> str:
         parts = []
