@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import date, datetime
-from app.models.models import GenderEnum, EventTypeEnum
+from app.models.models import GenderEnum, EventTypeEnum, RelationshipTypeEnum
 
 class PersonBase(BaseModel):
     first_name: str
@@ -16,12 +16,15 @@ class PersonBase(BaseModel):
     death_place: Optional[str] = None
     burial_place: Optional[str] = None
     gender: Optional[GenderEnum] = None
+    culture: Optional[str] = None
     photo_url: Optional[str] = None
     notes: Optional[str] = None
     tree_id: Optional[int] = 1
 
 class PersonCreate(PersonBase):
-    pass
+    # Добавляем поля для удобства создания связей при регистрации персоны
+    father_id: Optional[int] = None
+    mother_id: Optional[int] = None
 
 class PersonResponse(PersonBase):
     id: int
@@ -49,4 +52,22 @@ class LifeEventResponse(LifeEventBase):
     created_at: datetime
     updated_at: datetime
     created_by_id: Optional[int] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class RelationshipBase(BaseModel):
+    from_person_id: int
+    to_person_id: int
+    relationship_type: RelationshipTypeEnum
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    is_current: Optional[bool] = True
+    description: Optional[str] = None
+
+class RelationshipCreate(RelationshipBase):
+    pass
+
+class RelationshipResponse(RelationshipBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
     model_config = ConfigDict(from_attributes=True)

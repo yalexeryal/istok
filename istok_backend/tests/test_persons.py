@@ -59,3 +59,137 @@ async def test_get_persons_list(client: AsyncClient):
     response = await client.get("/persons/?tree_id=1")
     assert response.status_code == 200
     assert isinstance(response.json(), list)
+
+
+@pytest.mark.asyncio
+async def test_create_child_with_auto_lastname_and_relationship(client: AsyncClient):
+    """
+    Тест проверяет:
+    1. Создание отца.
+    2. Создание ребенка с указанием father_id, но БЕЗ указания last_name.
+    3. Проверка, что ребенку автоматически подставилась фамилия отца.
+    4. Проверка, что связь biological_parent была создана автоматически.
+    """
+    # 1. Создаем отца
+    father_data = {"first_name": "Иван", "last_name": "Сидоров", "gender": "male", "tree_id": 1}
+    res_father = await client.post("/persons/", json=father_data)
+    assert res_father.status_code == 201
+    father_id = res_father.json()["id"]
+
+    # 2. Создаем ребенка без фамилии, но с father_id
+    child_data = {
+        "first_name": "Алексей",
+        "gender": "male",
+        "tree_id": 1,
+        "father_id": father_id
+    }
+    res_child = await client.post("/persons/", json=child_data)
+    assert res_child.status_code == 201
+    child_id = res_child.json()["id"]
+
+    # 3. Проверяем, что фамилия подставилась
+    assert res_child.json()["last_name"] == "Сидоров", "Фамилия отца не была подставлена автоматически!"
+
+    # 4. Проверяем, что связь создалась
+    res_rels = await client.get(f"/relationships/persons/{child_id}")
+    assert res_rels.status_code == 200
+    rels = res_rels.json()
+
+    assert len(rels) == 1, "Связь с отцом не была создана!"
+    assert rels[0]["from_person_id"] == father_id
+    assert rels[0]["to_person_id"] == child_id
+    assert rels[0]["relationship_type"] == "biological_parent"
+
+
+@pytest.mark.asyncio
+async def test_auto_generate_patronymic(client: AsyncClient):
+    """
+    Тест проверяет автогенерацию отчества от отца для разных имен и полов.
+    """
+    # 1. Создаем отцов с разными именами
+    # Иван (стандартное)
+    res_f1 = await client.post("/persons/", json={"first_name": "Иван", "gender": "male", "tree_id": 1})
+    f1_id = res_f1.json()["id"]
+
+    # Дмитрий (на 'й')
+    res_f2 = await client.post("/persons/", json={"first_name": "Дмитрий", "gender": "male", "tree_id": 1})
+    f2_id = res_f2.json()["id"]
+
+    # Никита (исключение)
+    res_f3 = await client.post("/persons/", json={"first_name": "Никита", "gender": "male", "tree_id": 1})
+    f3_id = res_f3.json()["id"]
+
+    # 2. Создаем сына Ивана (должен стать Иванович)
+    res_son = await client.post("/persons/", json={
+        "first_name": "Алексей", "gender": "male", "tree_id": 1, "father_id": f1_id
+    })
+    assert res_son.json()["middle_name"] == "Иванович", f"Ожидался Иванович, получено {res_son.json()['middle_name']}"
+
+    # 3. Создаем дочь Дмитрия (должна стать Дмитриевна)
+    res_daughter = await client.post("/persons/", json={
+        "first_name": "Анна", "gender": "female", "tree_id": 1, "father_id": f2_id
+    })
+    assert res_daughter.json()[
+               "middle_name"] == "Дмитриевна", f"Ожидалась Дмитриевна, получено {res_daughter.json()['middle_name']}"
+
+    # 4. Создаем сына Никиты (исключение, должен стать Никитич)
+    res_son_nikita = await client.post("/persons/", json={
+        "first_name": "Петр", "gender": "male", "tree_id": 1, "father_id": f3_id
+    })
+    assert res_son_nikita.json()[
+               "middle_name"] == "Никитич", f"Ожидался Никитич, получено {res_son_nikita.json()['middle_name']}"
+
+
+@pytest.mark.asyncio
+async def test_patronymic_different_cultures(client: AsyncClient):
+    """Тест генерации отчеств для разных культур."""
+
+    # Русский
+    res_f_ru = await client.post("/persons/",
+                                 json={"first_name": "Иван", "gender": "male", "tree_id": 1, "culture": "ru"})
+    f_ru_id = res_f_ru.json()["id"]
+
+    res_son_ru = await client.post("/persons/", json={
+        "first_name": "Алексей", "gender": "male", "tree_id": 1, "father_id": f_ru_id, "culture": "ru"
+    })
+    assert res_son_ru.json()["middle_name"] == "Иванович"
+
+    # Украинский
+    res_f_uk = await client.post("/persons/",
+                                 json={"first_name": "Іван", "gender": "male", "tree_id": 1, "culture": "uk"})
+    f_uk_id = res_f_uk.json()["id"]
+
+    res_son_uk = await client.post("/persons/", json={
+        "first_name": "Олексій", "gender": "male", "tree_id": 1, "father_id": f_uk_id, "culture": "uk"
+    })
+    assert res_son_uk.json()["middle_name"] == "Іванович"
+
+    # Казахский
+    res_f_kk = await client.post("/persons/",
+                                 json={"first_name": "Асан", "gender": "male", "tree_id": 1, "culture": "kk"})
+    f_kk_id = res_f_kk.json()["id"]
+
+    res_son_kk = await client.post("/persons/", json={
+        "first_name": "Болат", "gender": "male", "tree_id": 1, "father_id": f_kk_id, "culture": "kk"
+    })
+    assert "ұлы" in res_son_kk.json()["middle_name"]
+
+    # Шведский
+    res_f_sv = await client.post("/persons/",
+                                 json={"first_name": "Erik", "gender": "male", "tree_id": 1, "culture": "sv"})
+    f_sv_id = res_f_sv.json()["id"]
+
+    res_son_sv = await client.post("/persons/", json={
+        "first_name": "Lars", "gender": "male", "tree_id": 1, "father_id": f_sv_id, "culture": "sv"
+    })
+    assert res_son_sv.json()["middle_name"] == "Erikson"
+
+    # Исландский
+    res_f_is = await client.post("/persons/",
+                                 json={"first_name": "Jón", "gender": "male", "tree_id": 1, "culture": "is"})
+    f_is_id = res_f_is.json()["id"]
+
+    res_daughter_is = await client.post("/persons/", json={
+        "first_name": "Björk", "gender": "female", "tree_id": 1, "father_id": f_is_id, "culture": "is"
+    })
+    assert res_daughter_is.json()["middle_name"] == "Jóndóttir"

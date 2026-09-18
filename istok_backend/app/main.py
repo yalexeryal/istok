@@ -1,3 +1,7 @@
+"""
+Главный файл приложения FastAPI.
+Инициализация, lifespan-события и подключение роутеров.
+"""
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,13 +10,14 @@ from passlib.context import CryptContext
 
 from app.core.database import engine, Base, AsyncSessionLocal
 from app.models.models import User
-from app.api import auth, persons, life_events
+from app.api import auth, persons, life_events, relationships
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # --- STARTUP ---
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -41,6 +46,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Подключаем все роутеры
 app.include_router(auth.router)
 app.include_router(persons.router)
 app.include_router(life_events.router)
+app.include_router(relationships.router)  # <-- ДОБАВЛЕНО

@@ -1,12 +1,20 @@
+"""
+Настройки приложения.
+Pydantic автоматически читает переменные из файла .env.
+Если файла нет или в нем нет этих переменных, приложение выдаст ошибку.
+"""
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql+asyncpg://istok_user:istok_password@localhost:5433/istok_db"
-    SECRET_KEY: str = "your_super_secret_key_for_development_123"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+    DATABASE_URL: str
+    SECRET_KEY: str
+    ALGORITHM: str
+    ACCESS_TOKEN_EXPIRE_MINUTES: int
 
-    model_config = ConfigDict(env_file=".env")
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8"
+    )
 
 settings = Settings()

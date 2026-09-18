@@ -60,6 +60,7 @@ class Person(Base):
     death_place = Column(String(255), nullable=True)
     burial_place = Column(String(255), nullable=True)
     gender = Column(SAEnum(GenderEnum), nullable=True)
+    culture = Column(String(50), nullable=True)
     photo_url = Column(String(500), nullable=True)
     notes = Column(Text, nullable=True)
     tree_id = Column(Integer, nullable=False, default=1, index=True)
@@ -70,7 +71,6 @@ class Person(Base):
     life_events = relationship("LifeEvent", back_populates="person", cascade="all, delete-orphan",
                                foreign_keys="LifeEvent.person_id")
     updater = relationship("User", foreign_keys=[updated_by_id])
-
     @property
     def full_name_display(self) -> str:
         parts = []

@@ -153,6 +153,9 @@ istok_backend/.env
 .envrc
 .venv
 env/
+.env
+.env*.local
+istok_backend/.env
 venv/
 ENV/
 env.bak/
@@ -221,7 +224,6 @@ __marimo__/
 техкарта/
 uploads/
 img/
-.env
 .env.prod
 nginx/ssl
 
@@ -293,10 +295,6 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files
-.env*.local
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
- istok_backend/__pycache__/
