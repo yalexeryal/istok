@@ -1,7 +1,14 @@
+"""
+Pydantic схемы для валидации входящих данных и форматирования исходящих ответов API.
+"""
 from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import date, datetime
-from app.models.models import GenderEnum, EventTypeEnum, RelationshipTypeEnum
+from app.models.models import GenderEnum, EventTypeEnum, RelationshipTypeEnum, CollaboratorRoleEnum, ChangeRequestStatusEnum
+
+# ==========================================
+# PERSON SCHEMAS
+# ==========================================
 
 class PersonBase(BaseModel):
     first_name: str
@@ -37,6 +44,10 @@ class PersonResponse(PersonBase):
     full_name_display: str
     model_config = ConfigDict(from_attributes=True)
 
+# ==========================================
+# LIFE EVENT SCHEMAS
+# ==========================================
+
 class LifeEventBase(BaseModel):
     event_type: EventTypeEnum
     event_date: Optional[date] = None
@@ -57,6 +68,10 @@ class LifeEventResponse(LifeEventBase):
     created_by_id: Optional[int] = None
     model_config = ConfigDict(from_attributes=True)
 
+# ==========================================
+# RELATIONSHIP SCHEMAS
+# ==========================================
+
 class RelationshipBase(BaseModel):
     from_person_id: int
     to_person_id: int
@@ -73,4 +88,62 @@ class RelationshipResponse(RelationshipBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+# ==========================================
+# TREE SCHEMAS
+# ==========================================
+
+class TreeBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    is_public: Optional[bool] = False
+
+class TreeCreate(TreeBase):
+    pass
+
+class TreeResponse(TreeBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+# ==========================================
+# COLLABORATOR SCHEMAS
+# ==========================================
+
+class CollaboratorBase(BaseModel):
+    user_id: int
+    role: CollaboratorRoleEnum
+    can_invite: Optional[bool] = False
+
+class CollaboratorCreate(CollaboratorBase):
+    pass
+
+class CollaboratorResponse(CollaboratorBase):
+    id: int
+    tree_id: int
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+# ==========================================
+# CHANGE REQUEST SCHEMAS
+# ==========================================
+
+class ChangeRequestBase(BaseModel):
+    person_id: int
+    change_type: str  # create/update/delete
+    proposed_data: Optional[dict] = None
+    response_comment: Optional[str] = None
+
+class ChangeRequestCreate(ChangeRequestBase):
+    requested_by_id: Optional[int] = None
+
+class ChangeRequestResponse(ChangeRequestBase):
+    id: int
+    requested_by_id: int
+    owner_id: int
+    status: ChangeRequestStatusEnum
+    created_at: datetime
+    responded_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)

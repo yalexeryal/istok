@@ -10,14 +10,13 @@ from passlib.context import CryptContext
 
 from app.core.database import engine, Base, AsyncSessionLocal
 from app.models.models import User
-from app.api import auth, persons, life_events, relationships
+from app.api import auth, persons, life_events, relationships, trees, change_requests
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- STARTUP ---
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -50,4 +49,6 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(persons.router)
 app.include_router(life_events.router)
-app.include_router(relationships.router)  # <-- ДОБАВЛЕНО
+app.include_router(relationships.router)
+app.include_router(trees.router)
+app.include_router(change_requests.router)
